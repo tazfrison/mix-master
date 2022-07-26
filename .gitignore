@@ -1,0 +1,11 @@
+build/*
+node_modules/*
+cert.pem
+key.pem
+log.log
+.vscode/*
+crash.log
+data/database.sqlite3
+sequelize/*
+config/*
+public/*
