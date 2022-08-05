@@ -28,6 +28,9 @@ export default class Log extends Model {
   @Column
   redScore: number;
 
+  @Column
+  winner?: TEAMS;
+
   @Column(STRING)
   set teamStats(value: { [team in TEAMS]: LogJson.Team }) {
     this.setDataValue('teamStats', JSON.stringify(value));

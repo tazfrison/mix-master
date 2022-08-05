@@ -59,10 +59,13 @@ export default async function checkIp(ip: string): Promise<boolean | undefined> 
     if (response.data.status === 'success') {
       const model = await IPCheck.create({ ip, validated: parseInt(response.data.result) !== 1});
       return model.validated;
+    } else if (response.data.status === 'error' && response.data.result === '-3') {
+      const model = await IPCheck.create({ ip, validated: true});
+      return model.validated;
     }
     throw new Error(JSON.stringify(response.data));
   } catch (e) {
-    if (e.response.status === 429) {
+    if (e.response && e.response.status === 429) {
       console.log('Too Many Requests');
     } else {
       console.log('Error validating ' + ip, e);

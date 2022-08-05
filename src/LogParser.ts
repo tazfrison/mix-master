@@ -8,7 +8,7 @@ import LogMedicStats from './models/LogMedicStats';
 import LogPlayer from './models/LogPlayer';
 import Player from './models/Player';
 import Round from './models/Round';
-import { CLASSES, LogJson } from './types';
+import { CLASSES, LogJson, TEAMS } from './types';
 
 const valid = (num: number, denom: number) => ((denom === 0) ? 0 : (num / denom));
 
@@ -136,8 +136,16 @@ export default class LogParser {
     //Find existing log
     this.logModel = await Log.findByPk(this.logId, { transaction: this.transaction });
 
+    let winner: TEAMS = null;
+    if (rootJson.teams.Blue.score > rootJson.teams.Red.score) {
+      winner = TEAMS.Blue;
+    } else if (rootJson.teams.Blue.score < rootJson.teams.Red.score) {
+      winner = TEAMS.Red;
+    }
+
     const logAttributes: InferCreationAttributes<Log> = {
       id: this.logId,
+      winner,
       title: rootJson.info.title,
       upload: new Date(rootJson.info.date * 1000),
       map: rootJson.info.map,
@@ -325,7 +333,7 @@ export default class LogParser {
       const playerModel = this.playerModels[steamId];
       for (const classStatsJson of classStatsList) {
         const className = classStatsJson.type;
-        if (!className) {
+        if (!className || (className.toString()) === 'undefined') {
           continue;
         }
         const classStatAttributes: InferCreationAttributes<LogClassStats> = {

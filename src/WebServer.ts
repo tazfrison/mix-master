@@ -11,7 +11,7 @@ import passport from 'passport';
 import SteamStrategy from 'passport-steam';
 
 import SequelizeStore from 'connect-session-sequelize';
-import { generate } from './Stats';
+import { fetch } from './Stats';
 
 const store = new (SequelizeStore(session.Store))({
   db: sequelize,
@@ -25,7 +25,7 @@ if (port) {
 } else {
   port = 80;
 }
-let frontend: string = config.get('frontend');
+let frontend: string = config.get('express.frontend');
 if (!frontend) {
   frontend = baseUrl;
 }
@@ -41,7 +41,7 @@ passport.deserializeUser(function (obj, done) {
 });
 
 passport.use(new (SteamStrategy as any)({
-  returnURL: frontend + '/auth/steam/return',
+  returnURL: baseUrl + '/auth/steam/return',
   realm: baseUrl,
   apiKey: API_KEY,
 },
@@ -118,9 +118,9 @@ export default class WebServer {
       }
       res.json(state);
     });
-    
+
     this.app.get('/api/stats', async (req, res) => {
-      res.json(await generate());
+      res.json(await fetch());
     });
 
     const isAdmin: RequestHandler = (req, res, next) => {
@@ -132,8 +132,8 @@ export default class WebServer {
     };
 
     this.app.post('/api/fakes',// isAdmin,
-      (req, res) => {
-        data().fakes(req.body[0], req.body[1]);
+      async (req, res) => {
+        await data().fakes(req.body[0], req.body[1]);
         res.json(data().getState());
       });
 
@@ -217,27 +217,16 @@ export default class WebServer {
       });
     });
 
-    data().on('updateUser', user => {
-      this.sockets.forEach(socket => {
-        socket.emit('users/update', user);
-      });
-    });
-
-    data().on('updateServer', server => {
-      this.sockets.forEach(socket => {
-        socket.emit('servers/update', server);
-      });
-    });
-
-    data().on('updateDraft', draft => {
-      this.sockets.forEach(socket => {
-        socket.emit('draft/update', draft);
-      });
-    });
-
-    data().on('updateLog', log => {
-      this.sockets.forEach(socket => {
-        socket.emit('logs/update', log);
+    [
+      'users/update', 'users/delete',
+      'servers/update', 'servers/delete',
+      'draft/update',
+      'logs/update',
+    ].forEach(event => {
+      data().on(event, data => {
+        this.sockets.forEach(socket => {
+          socket.emit(event, data);
+        });
       });
     });
   }

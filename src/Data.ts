@@ -3,7 +3,7 @@ import EventEmitter from 'events';
 import Draft from './Draft';
 import { createFakeServer, createFakeUser, FakeServer, FakeUser } from './fakes';
 import Mumble from './Mumble';
-import TF2 from './TF2';
+import TF2Server from './TF2Server';
 import User from './User';
 
 import { Sequelize } from 'sequelize-typescript';
@@ -17,16 +17,21 @@ import LogPlayer from './models/LogPlayer';
 import Player from './models/Player';
 import Round from './models/Round';
 import VoiceAccount from './models/VoiceAccount';
+import AggregatedClassStats from './models/AggregatedClassStats';
+import { updateStats } from './Stats';
 
 const adminList: string[] = config.get('roles.admin');
 
-const models = [LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck];
+const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck];
 
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
   storage: './data/database.sqlite3',
   models,
   logging: false,
+  retry: {
+    max: 10
+  },
 });
 
 declare global {
@@ -44,14 +49,14 @@ declare global {
 class Data extends EventEmitter {
   users: { [id: number]: User } = {};
   ipMap: { [ip: string]: number } = {};
-  servers: { [ip: string]: TF2 } = {};
+  servers: { [ip: string]: TF2Server } = {};
   draft: Draft;
   mumble?: Mumble;
   constructor() {
     super();
 
     this.draft = new Draft();
-    this.draft.on('update', () => this.emit('updateDraft', this.draft));
+    this.draft.on('update', () => this.emit('draft/update', this.draft));
   }
 
   async initModels() {
@@ -118,6 +123,7 @@ class Data extends EventEmitter {
       console.log('Refreshing ' + log.id);
       await this.importLog(log.id);
     }
+    await updateStats();
     return { logs: logs.length };
   }
 
@@ -125,7 +131,9 @@ class Data extends EventEmitter {
     const parser = new LogParser(logId);
     await parser.import();
     const log = await this.fetchLog(logId);
-    this.emit('updateLog', log);
+    const playerIds = log.players.map(player => player.id);
+    await(updateStats(playerIds));
+    this.emit('logs/update', log);
     return log;
   }
 
@@ -149,9 +157,14 @@ class Data extends EventEmitter {
     return this.servers[ip];
   }
 
-  addServer(server: TF2) {
-    this.servers[server.ip] = server;
-    server.on('update', () => this.emit('updateServer', server));
+  addServer(server: TF2Server) {
+    this.servers[server.config.ip] = server;
+    server.on('update', () => this.emit('servers/update', server));
+    server.on('disconnect', () => {
+      delete this.servers[server.config.ip];
+      server.removeAllListeners();
+      this.emit('servers/delete', server);
+    });
   }
 
   addMumble(mumble: Mumble) {
@@ -170,7 +183,13 @@ class Data extends EventEmitter {
     let user = this.fetchUserByIP(ip);
     if (!user) {
       user = new User(ip);
-      user.on('update', () => this.emit('updateUser', user));
+      user.on('update', () => this.emit('users/update', user));
+      user.on('disconnect', () => {
+        this.emit('users/delete', user);
+        user.removeAllListeners();
+        delete this.users[user.id];
+        delete this.ipMap[user.ip];
+      });
       this.users[user.id] = user;
       this.ipMap[ip] = user.id;
     }
@@ -179,7 +198,7 @@ class Data extends EventEmitter {
 
   async getState() {
     return {
-      servers: Object.values(this.servers).sort((a, b) => a.ip.localeCompare(b.ip)),
+      servers: Object.values(this.servers).sort((a, b) => a.config.name.localeCompare(b.config.name)),
       users: Object.values(this.users),
       draft: this.draft,
       logs: await this.fetchLogs(),
@@ -188,7 +207,7 @@ class Data extends EventEmitter {
     } as any;
   }
 
-  fakes(users: number, servers: number) {
+  async fakes(users: number, servers: number) {
     for (let [id, user] of Object.entries(this.users)) {
       if (user instanceof FakeUser) {
         user.removeAllListeners();
@@ -201,8 +220,9 @@ class Data extends EventEmitter {
         delete this.servers[ip];
       }
     }
+    const players = await Player.findAll();
     for (let i = 0; i < users; ++i) {
-      createFakeUser();
+      createFakeUser(players);
     }
 
     for (let i = 1; i <= servers; ++i) {

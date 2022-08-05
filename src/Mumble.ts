@@ -1,5 +1,5 @@
 import * as Events from 'events';
-import { Client, connect, User as MumbleUser } from 'mumble';
+import { Client, connect, User as BaseUser } from 'mumble';
 import data from './Data';
 import User from './User';
 import config from 'config';
@@ -9,7 +9,60 @@ export interface UserJoined {
   session: number;
   name: string;
   ip: string;
-  user: MumbleUser;
+  user: BaseUser;
+}
+
+export class MumbleUser {
+  constructor(public user: BaseUser) {
+
+  }
+
+  get name() {
+    return this.user.name;
+  }
+
+  get hash() {
+    return this.user.hash;
+  }
+
+  setMute(isMute: boolean) {
+    this.user.setMute(isMute);
+  }
+
+  setDeaf(isDeaf: boolean) {
+    this.user.setDeaf(isDeaf);
+  }
+
+  kick(message: string) {
+    this.user.kick(message);
+  }
+
+  ban(message: string) {
+    this.user.ban(message);
+  }
+
+  move(channelId: number) {
+    this.user.moveToChannel(data().mumble?.getChannelById(channelId));
+  }
+
+  toJSON() {
+    return {
+      name: this.user.name,
+      hash: this.user.hash,
+      mute: this.user.mute,
+      deaf: this.user.deaf,
+      channel: {
+        id: this.user.channel.id,
+        name: this.user.channel.name,
+        path: this.user.channel.getPath(),
+      },
+      session: this.user.session,
+    };
+  }
+
+  toString() {
+    return JSON.stringify(this.toJSON());
+  }
 }
 
 const USERNAME: string = config.get('mumble.username');
@@ -56,7 +109,7 @@ export default class Mumble extends Events.EventEmitter {
   }
 
   setupListeners() {
-    const notify = async (mUser: MumbleUser) => {
+    const notify = async (mUser: BaseUser) => {
       if (!this.sessionMap[mUser.session]) {
         return;
       }
@@ -68,7 +121,7 @@ export default class Mumble extends Events.EventEmitter {
     this.client.on('user-mute', notify);
     this.client.on('user-deaf', notify);
 
-    this.client.on('user-connect', (user: MumbleUser) => {
+    this.client.on('user-connect', (user: BaseUser) => {
       if (user.name === 'mix-master') {
         return;
       }
@@ -90,10 +143,10 @@ export default class Mumble extends Events.EventEmitter {
       const ip = address.match(/../g).map(a => parseInt(a, 16)).join('.');
       const user = data().upsertUser(ip);
       this.sessionMap[stats.session] = user;
-      user.setMumble(mUser);
+      user.setMumble(new MumbleUser(mUser));
     });
 
-    this.client.on('user-disconnect', async (mUser: MumbleUser) => {
+    this.client.on('user-disconnect', async (mUser: BaseUser) => {
       if (!this.sessionMap[mUser.session]) {
         return;
       }

@@ -6,25 +6,6 @@ import User from './User';
 const RED = TEAMS.Red;
 const BLU = TEAMS.Blue;
 
-const channels: { [serverIp: string]: { [RED]: number, [BLU]: number } } = {
-  'mix1.newbie.tf': {
-    [RED]: 113,
-    [BLU]: 114,
-  },
-  'mix2.newbie.tf': {
-    [RED]: 117,
-    [BLU]: 116,
-  },
-  'mix3.newbie.tf': {
-    [RED]: 145,
-    [BLU]: 118,
-  },
-  'fake1': {
-    [RED]: 113,
-    [BLU]: 114,
-  },
-};
-
 interface Slot {
   class: CLASSES;
   name: string;
@@ -70,10 +51,7 @@ class Team {
 export default class Draft extends EventEmitter {
   active: boolean = false;
   serverIp?: string;
-  teams?: {
-    [RED]: Team,
-    [BLU]: Team,
-  };
+  teams?: {[team in TEAMS]?: Team};
   type: DRAFT_TYPE = DRAFT_TYPE.COACHED_MIX;
 
   start(serverIp: string) {
@@ -81,13 +59,14 @@ export default class Draft extends EventEmitter {
     if (this.active) {
       throw new Error('Draft already in progress');
     }
-    if (!server || !channels[serverIp]) {
+    if (!server || !server.config.channels) {
       throw new Error('Invalid server');
     }
+    const channels = server.config.channels;
     this.serverIp = serverIp;
     this.teams = {
-      [RED]: new Team(RED, channels[serverIp][RED]),
-      [BLU]: new Team(BLU, channels[serverIp][BLU]),
+      [RED]: new Team(RED, channels[RED]),
+      [BLU]: new Team(BLU, channels[BLU]),
     };
     this.active = true;
     this.notify();
@@ -95,7 +74,9 @@ export default class Draft extends EventEmitter {
 
   draft(team: TEAMS, index: number, userId?: number) {
     const user = userId ? data().fetchUser(userId) : undefined;
-    this.teams[team].draft(index, user);
+    if (this.teams[team]) {
+      this.teams[team].draft(index, user);
+    }
     this.notify();
   }
 

@@ -24,11 +24,70 @@ export enum CLASSES {
   medic = 'medic',
   sniper = 'sniper',
   spy = 'spy',
+  spectator = 'spectator',
+  unassigned = 'unassigned',
 }
 
 export enum TEAMS {
   Red = 'Red',
   Blue = 'Blue',
+  Spectator = 'Spectator',
+  Unassigned = 'Unassigned',
+}
+
+export namespace Config {
+  export interface Root {
+    roles: {
+      admin: string[];
+    };
+    express: Express;
+    steam: {
+      apiKey: string;
+    };
+    mumble: Mumble;
+    ipCheck: IPCheck;
+    tf2: TF2;
+  }
+
+  export interface Express {
+    url: string;
+    port: number;
+    secret: string;
+    frontend?: string;
+  }
+
+  export interface Mumble {
+    username: string;
+    ip: string;
+    tags: Tags
+  }
+
+  export interface Tags {
+    [channelId: number]: {
+      [className in CLASSES]?: SKILLS;
+    };
+  }
+
+  export interface IPCheck {
+    url: string;
+    email: string;
+  }
+
+  export interface TF2 {
+    maps: string[];
+    servers: TF2Server[];
+  }
+
+  export interface TF2Server {
+    name: string;
+    ip: string;
+    port?: number;
+    rcon: string;
+    password: string;
+    channels?: {
+      [team in TEAMS]: number;
+    }
+  }
 }
 
 export namespace LogJson {
