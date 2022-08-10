@@ -17,7 +17,7 @@ export default class Round extends Model {
   number: number;
 
   @Column
-  start_time: Date;
+  startTime: Date;
 
   @Column
   duration: number;

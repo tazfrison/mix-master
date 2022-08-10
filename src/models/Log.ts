@@ -39,23 +39,15 @@ export default class Log extends Model {
     return JSON.parse(this.getDataValue('teamStats'));
   }
 
-  @HasMany(() => Round, {
-    onDelete: 'CASCADE',
-  })
+  @HasMany(() => Round)
   rounds?: Round[];
 
-  @HasMany(() => LogPlayer, {
-    onDelete: 'CASCADE',
-  })
+  @HasMany(() => LogPlayer)
   players?: LogPlayer[];
 
-  @HasMany(() => LogClassStats, {
-    onDelete: 'CASCADE',
-  })
+  @HasMany(() => LogClassStats)
   classStats?: LogClassStats[];
 
-  @HasMany(() => LogMedicStats, {
-    onDelete: 'CASCADE',
-  })
+  @HasMany(() => LogMedicStats)
   medicStats?: LogMedicStats[];
 }

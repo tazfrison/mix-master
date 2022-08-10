@@ -18,7 +18,7 @@ const CLASS_MAP: { [name: string]: CLASSES } = {
   Scout: CLASSES.scout,
   Soldier: CLASSES.soldier,
   Pyro: CLASSES.pyro,
-  Demo: CLASSES.demoman,
+  Demoman: CLASSES.demoman,
   Heavy: CLASSES.heavy,
   Engineer: CLASSES.engineer,
   Medic: CLASSES.medic,

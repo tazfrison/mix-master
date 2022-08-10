@@ -176,7 +176,7 @@ export default class LogParser {
     for (const roundJson of roundsJson) {
       const roundAttributes: InferCreationAttributes<Round> = {
         number: ++i,
-        start_time: new Date(roundJson.start_time * 1000),
+        startTime: new Date(roundJson.start_time * 1000),
         duration: roundJson.length,
         logId: this.logModel.id,
         log: this.logModel,

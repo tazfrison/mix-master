@@ -19,6 +19,7 @@ import Round from './models/Round';
 import VoiceAccount from './models/VoiceAccount';
 import AggregatedClassStats from './models/AggregatedClassStats';
 import { updateStats } from './Stats';
+import { SequelizeStorage, Umzug } from 'umzug';
 
 const adminList: string[] = config.get('roles.admin');
 
@@ -60,8 +61,16 @@ class Data extends EventEmitter {
   }
 
   async initModels() {
-    for (const model of models) {
-      await model.sync();
+    const umzug = new Umzug({
+      migrations: { glob: 'build/migrations/*.js' },
+      context: sequelize.getQueryInterface(),
+      storage: new SequelizeStorage({ sequelize }),
+      logger: console,
+    });
+    const pending = await umzug.pending();
+    if (pending.length > 0) {
+      await umzug.up();
+      await this.refreshLogs();
     }
   }
 

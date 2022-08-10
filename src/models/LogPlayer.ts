@@ -60,13 +60,9 @@ export default class LogPlayer extends Model {
     return JSON.parse(this.getDataValue('rawStats'));
   }
 
-  @HasMany(() => LogClassStats, {
-    onDelete: 'CASCADE',
-  })
+  @HasMany(() => LogClassStats)
   logClassStats?: LogClassStats[];
 
-  @HasOne(() => LogMedicStats, {
-    onDelete: 'CASCADE',
-  })
+  @HasOne(() => LogMedicStats)
   logMedicStats?: LogMedicStats;
 }
