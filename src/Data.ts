@@ -72,25 +72,9 @@ class Data extends EventEmitter {
       await umzug.up();
       await this.refreshLogs();
     }
-  }
-
-  async fetchLog(logId: number) {
-    return Log.findByPk(logId, {
-      include: [{
-        model: Round,
-      }, {
-        model: LogPlayer,
-        include: [Player, LogMedicStats, {
-          model: LogClassStats,
-          separate: true,
-          order: [['playtime', 'DESC']],
-        }],
-      }],
-    });
-  }
-
-  async fetchLogs() {
-    return Log.findAll();
+    for (const model of models) {
+      await model.sync();
+    }
   }
 
   async fetchPlayer(steamId: string) {
@@ -117,15 +101,6 @@ class Data extends EventEmitter {
     });
   }
 
-  async purgeLogs(full?: boolean) {
-    for (const model of models) {
-      await model.drop();
-    }
-    await sequelize.sync({
-      alter: true,
-    });
-  }
-
   async refreshLogs() {
     const logs = await Log.findAll();
     for (const log of logs) {
@@ -139,7 +114,7 @@ class Data extends EventEmitter {
   async importLog(logId: number) {
     const parser = new LogParser(logId);
     await parser.import();
-    const log = await this.fetchLog(logId);
+    const log = await Log.scope('full').findByPk(logId);
     const playerIds = log.players.map(player => player.id);
     await(updateStats(playerIds));
     this.emit('logs/update', log);
@@ -210,7 +185,7 @@ class Data extends EventEmitter {
       servers: Object.values(this.servers).sort((a, b) => a.config.name.localeCompare(b.config.name)),
       users: Object.values(this.users),
       draft: this.draft,
-      logs: await this.fetchLogs(),
+      logs: await Log.findAll(),
       players: await this.fetchPlayers(),
       maps: config.get('tf2.maps'),
     } as any;

@@ -1,10 +1,26 @@
 import { STRING } from 'sequelize';
-import { Column, HasMany, Model, Table } from 'sequelize-typescript';
+import { Column, HasMany, Model, Scopes, Table } from 'sequelize-typescript';
 import { LogJson, TEAMS } from '../types';
 import LogClassStats from './LogClassStats';
 import LogMedicStats from './LogMedicStats';
 import LogPlayer from './LogPlayer';
+import Player from './Player';
 import Round from './Round';
+
+@Scopes(() => ({
+  full: {
+    include: [{
+      model: Round,
+    }, {
+      model: LogPlayer,
+      include: [Player, LogMedicStats, {
+        model: LogClassStats,
+        separate: true,
+        order: [['playtime', 'DESC']],
+      }],
+    }],
+  }
+}))
 
 @Table({
   timestamps: false,
