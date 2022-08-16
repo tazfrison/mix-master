@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import { STATUS_CODES } from 'http';
 import { InferAttributes } from 'sequelize/types';
 import data from '../Data';
 import Server from '../models/Server';
+import TF2Server from '../TF2Server';
 import { isAdmin } from './helpers';
 
 const router = Router();
@@ -12,17 +14,18 @@ router.post('/', async (req, res) => {
   res.json(server);
 });
 
-router.use('/:id', async (req, res, next) => {
-  if (!req.params.id) {
-    next('Missing Id');
-  }
-  res.locals.server = data().fetchServer(req.params.id);
-  next();
-});
-
-router.get('/:id', (_req, res) => {
-  res.json(res.locals.server);
-});
+router.use('/:id', isAdmin
+  , async (req, res, next) => {
+    if (!req.params.id) {
+      next('Missing Id');
+    }
+    const server = await Server.scope('admin').findByPk(parseInt(req.params.id));
+    if (!server) {
+      next('Invalid server');
+    }
+    res.locals.server = server;
+    next();
+  });
 
 router.patch('/:id', async (req, res) => {
   const body: InferAttributes<Server> = req.body;
@@ -32,7 +35,38 @@ router.patch('/:id', async (req, res) => {
   res.json(server);
 });
 
-router.post('/:id/:action', isAdmin,
+router.delete('/:id',
+  (_req, res) => {
+    const server: Server = res.locals.server;
+    const liveServer = data().fetchServer(server.id);
+    if (liveServer) {
+      liveServer.disconnect();
+    }
+    server.destroy();
+    res.sendStatus(200);
+  });
+
+router.get('/:id/connect',
+  (_req, res) => {
+    const server: Server = res.locals.server;
+    const liveServer = data().fetchServer(server.id);
+    if (!liveServer) {
+      data().addServer(server);
+    }
+    res.sendStatus(200);
+  });
+
+router.get('/:id/disconnect',
+  (_req, res) => {
+    const server: Server = res.locals.server;
+    const liveServer = data().fetchServer(server.id);
+    if (liveServer) {
+      liveServer.disconnect();
+    }
+    res.sendStatus(200);
+  });
+
+router.post('/:id/:action',
   (req, res, next) => {
     const server: any = res.locals.server;
     const action = req.params.action;

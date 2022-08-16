@@ -37,9 +37,10 @@ router.post('/draft/:action', isAdmin,
     return next('Not an action');
   });
 
-router.get('/servers', (_req, res) => {
-  res.json(Server.findAll());
-});
+router.get('/servers', isAdmin,
+  async (_req, res) => {
+    res.json(await Server.scope('admin').findAll());
+  });
 
 router.use('/server', ServerRouter);
 router.use('/logs', LogsRouter);

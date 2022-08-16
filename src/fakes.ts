@@ -54,14 +54,17 @@ export class FakeUser extends User {
   }
 }
 
-export class FakeServer extends TF2Server {
+/*export class FakeServer extends TF2Server {
   constructor(password: string, ip: string, port: number = 27015) {
     super({
       ip,
       password,
       name: ip,
       rcon: 'fake',
-      port
+      port,
+      active: true,
+      advancedStats: false,
+      channels: { Red: 113, Blue: 114 }
     });
 
     this.score = {
@@ -82,9 +85,9 @@ export class FakeServer extends TF2Server {
 
   toJSON() {
     const server: any = {
-      name: this.config.name,
-      ip: this.config.ip,
-      password: this.config.password,
+      name: this.model.name,
+      ip: this.model.ip,
+      password: this.model.password,
       score: this.score,
       time: '00:00',
       live: false,
@@ -94,7 +97,7 @@ export class FakeServer extends TF2Server {
     };
     return server;
   }
-}
+}*/
 
 const MAPS: string[] = config.get('tf2.maps');
 
@@ -108,7 +111,7 @@ export const createFakeUser = (players: Player[]) => {
   data().users[user.id] = user;
 }
 
-export const createFakeServer = (i: number) => {
+/*export const createFakeServer = (i: number) => {
   const server = new FakeServer('nope', 'fake' + i);
   data().addServer(server);
-}
+}*/

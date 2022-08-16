@@ -1,5 +1,6 @@
 import config from 'config';
 import EventEmitter from 'events';
+import { TF2PlayerStats } from './AdvancedTF2Server';
 import data from './Data';
 import checkIp from './IPChecker';
 import Player from './models/Player';
@@ -42,7 +43,9 @@ export default class User extends EventEmitter {
         }
         if (this.tf2) {
           this.tf2.setMute(true);
-          this.tf2.setSpec(true);
+          if (this.tf2 instanceof TF2PlayerStats) {
+            this.tf2.setSpec(true);
+          }
         }
       }
       if (this.validated !== undefined) {
@@ -90,7 +93,9 @@ export default class User extends EventEmitter {
       });
     if (await this.validate() === false) {
       this.tf2.setMute(true);
-      this.tf2.setSpec(true);
+      if (this.tf2 instanceof TF2PlayerStats) {
+        this.tf2.setSpec(true);
+      }
     }
     await this.link();
     this.notify();

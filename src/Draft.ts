@@ -50,20 +50,20 @@ class Team {
 
 export default class Draft extends EventEmitter {
   active: boolean = false;
-  serverIp?: string;
+  serverId?: number;
   teams?: {[team in TEAMS]?: Team};
   type: DRAFT_TYPE = DRAFT_TYPE.COACHED_MIX;
 
-  start(serverIp: string) {
-    const server = data().fetchServer(serverIp);
+  start(serverId: number) {
+    const server = data().fetchServer(serverId);
     if (this.active) {
       throw new Error('Draft already in progress');
     }
-    if (!server || !server.config.channels) {
+    if (!server || !server.model.channels) {
       throw new Error('Invalid server');
     }
-    const channels = server.config.channels;
-    this.serverIp = serverIp;
+    const channels = server.model.channels;
+    this.serverId = serverId;
     this.teams = {
       [RED]: new Team(RED, channels[RED]),
       [BLU]: new Team(BLU, channels[BLU]),
@@ -82,7 +82,7 @@ export default class Draft extends EventEmitter {
 
   end() {
     this.active = false;
-    delete this.serverIp;
+    delete this.serverId;
     delete this.teams;
     this.notify();
   }
@@ -100,7 +100,7 @@ export default class Draft extends EventEmitter {
   toJSON() {
     const draft: any = {
       active: this.active,
-      serverIp: this.serverIp,
+      serverIp: this.serverId,
       type: this.type,
     };
 

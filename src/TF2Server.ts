@@ -2,54 +2,27 @@ import { EventEmitter } from 'events';
 import { clearInterval, setInterval } from 'timers';
 import data from './Data';
 import Player from './models/Player';
-import { CLASSES, Config, TEAMS } from './types';
+import Server from './models/Server';
 import User from './User';
+import { ID } from '@node-steam/id';
 
 const Rcon: any = require('rcon');
-
-const TEAM_MAP: { [name: string]: TEAMS } = {
-  'RED': TEAMS.Red,
-  'BLU': TEAMS.Blue,
-  'Spectator': TEAMS.Spectator,
-  'Unassigned': TEAMS.Unassigned,
-}
-
-const CLASS_MAP: { [name: string]: CLASSES } = {
-  Scout: CLASSES.scout,
-  Soldier: CLASSES.soldier,
-  Pyro: CLASSES.pyro,
-  Demoman: CLASSES.demoman,
-  Heavy: CLASSES.heavy,
-  Engineer: CLASSES.engineer,
-  Medic: CLASSES.medic,
-  Sniper: CLASSES.sniper,
-  Spy: CLASSES.spy,
-  Spectator: CLASSES.spectator,
-  Unassigned: CLASSES.unassigned,
-}
 
 export interface PlayerJoined {
   slotId: number;
   name: string;
   ip: string;
   steamId: string;
-  team: TEAMS;
-  class: CLASSES;
 }
 
 export class TF2Player extends EventEmitter{
   isMute: boolean = false;
-  isLocked: boolean = false;
   slotId: number;
   name: string;
-  team: TEAMS;
-  class: CLASSES;
   constructor(public player: Player, public user: User, public server: TF2Server, info: PlayerJoined) {
     super();
     this.slotId = info.slotId;
     this.name = info.name;
-    this.team = info.team;
-    this.class = info.class;
   }
 
   get steamId() {
@@ -73,28 +46,9 @@ export class TF2Player extends EventEmitter{
     this.server.send('sm_ban #' + this.slotId + ' ' + message);
   }
 
-  setSpec(isLocked: boolean) {
-    if (isLocked) {
-      this.server.send('sm_splock #' + this.slotId);
-    } else {
-      this.server.send('sm_spunlock #' + this.slotId);
-    }
-    this.isLocked = isLocked;
-  }
-
   update(playerInfo: PlayerJoined) {
-    let notify = false;
-    const keys: (keyof TF2Player & keyof PlayerJoined)[] = ['name', 'team', 'class'];
-    keys.forEach(key => {
-      if (key === 'steamId' || key === 'slotId') {
-        return;
-      }
-      if (this[key] !== playerInfo[key]) {
-        notify = true;
-        (this as any)[key] = playerInfo[key];
-      }
-    });
-    if (notify) {
+    if (this.name !== playerInfo.name) {
+      this.name = playerInfo.name;
       this.emit('update');
     }
   }
@@ -109,11 +63,8 @@ export class TF2Player extends EventEmitter{
       slotId: this.slotId,
       name: this.player.name,
       steamId: this.player.steamId,
-      serverIp: this.server.config.ip,
+      serverIp: this.server.model.ip,
       mute: this.isMute,
-      isLocked: this.isLocked,
-      team: this.team,
-      class: this.class,
     };
   }
 
@@ -123,25 +74,18 @@ export class TF2Player extends EventEmitter{
 }
 
 export default class TF2Server extends EventEmitter {
-  config: Config.TF2Server;
+  model: Server;
   ready: boolean = false;
   connection: any;
   interval: NodeJS.Timer;
   players: { [userId: number]: TF2Player } = {};
   map: string;
-  score: {
-    [TEAMS.Blue]: number;
-    [TEAMS.Red]: number;
-  } = { [TEAMS.Blue]: 0, [TEAMS.Red]: 0 };
-  time: string = '--:--';
-  live: boolean;
-  paused: boolean = false;
 
-  constructor(config: Config.TF2Server) {
+  constructor(server: Server) {
     super();
-    this.config = config;
+    this.model = server;
 
-    this.connection = new Rcon(config.ip, config.port || 27015, config.rcon);
+    this.connection = new Rcon(server.ip, server.port || 27015, server.rcon);
     this.setupListeners();
     this.connection.connect();
   }
@@ -149,21 +93,20 @@ export default class TF2Server extends EventEmitter {
   setupListeners() {
     this.connection.on('auth', () => {
       this.ready = true;
-      data().addServer(this);
+      console.log('Connected ' + this.model.name);
       this.listen();
+      this.emit('ready');
     }).on('error', (err: string) => {
       if (!this.ready) {
-        setTimeout(() => {
-          this.connection.connect();
-        }, 60 * 1000);
         return;
       }
-      console.log(this.config.ip + ' Error: ' + err);
+      console.log(this.model.ip + ' Error: ' + err);
     }).on('end', () => {
-      console.log(this.config.ip + ' lost connection');
+      console.log(this.model.ip + ' disconnected');
+      this.ready = false;
       clearInterval(this.interval);
       this.emit('disconnect');
-      this.connection.connect();
+      //TODO: Reconnect logic
     });
   }
 
@@ -180,7 +123,7 @@ export default class TF2Server extends EventEmitter {
       player = await Player.create({ steamId, name });
     }
     const user = data().upsertUser(ip);
-    const tf2Player = new TF2Player(player, user, this, info);
+    let tf2Player = new TF2Player(player, user, this, info);
     user.setTf2(tf2Player);
 
     return tf2Player;
@@ -190,44 +133,47 @@ export default class TF2Server extends EventEmitter {
     this.connection.send('changelevel ' + mapName);
   }
 
+  disconnect() {
+    for (const player of Object.values(this.players)) {
+      player.disconnect();
+    }
+    this.connection.disconnect();
+  }
+
   listen() {
     this.connection.on('response', async (status: string) => {
-      if (status[0] !== '{') {
+      if (!status.startsWith('hostname')) {
         return;
       }
-      await this.parseStats(status);
+      await this.parseJSON(status);
       this.emit('update');
     });
     this.interval = setInterval(() => {
-      this.connection.send('sm_gamejson');
+      this.connection.send('status');
     }, 1000);
   }
 
-  async parseStats(output: string) {
-    const players = output.split('\n');
-    const stats = JSON.parse(players.shift());
-    this.score = {
-      [TEAMS.Blue]: stats.BLU,
-      [TEAMS.Red]: stats.RED,
-    };
-    this.live = stats.live == 1;
-    this.paused = this.time === stats.time;
-    this.time = stats.time;
-    this.map = stats.map;
-
-    //Get current player info
+  async parseJSON(output: string) {
+    const lines = output.split('\n');
     const newPlayers: { [userId: number]: PlayerJoined } = {};
-    for (const entry of players) {
-      const info = JSON.parse(entry);
-      const parsedInfo: PlayerJoined = {
-        name: info[0],
-        team: TEAM_MAP[info[1]],
-        class: CLASS_MAP[info[2]],
-        steamId: info[3],
-        ip: info[4],
-        slotId: info[5],
+
+    //Get current player info and map
+    for(const line of lines) {
+      if (line.startsWith('map')) {
+        this.map = line.match(/map\s*: (\w+)/)[1];
+      } else if (line.startsWith('#') && !line.startsWith('# userid')) {
+        const values = line.match(/^#\s+(\d+)[^"]+"(.+)"\s+(\[.*\]).*\s(\d+\.\d+\.\d+\.\d)/);
+        if (values === null) {
+          continue;
+        }
+        const parsedInfo: PlayerJoined = {
+          name: values[2],
+          steamId: new ID(values[3]).get64(),
+          ip: values[4],
+          slotId: parseInt(values[1]),
+        };
+        newPlayers[parsedInfo.slotId] = parsedInfo;
       }
-      newPlayers[parsedInfo.slotId] = parsedInfo;
     }
 
     Object.keys(this.players).map(a => parseInt(a)).forEach((userId) => {//Iterate players from last check
@@ -251,14 +197,13 @@ export default class TF2Server extends EventEmitter {
 
   toJSON() {
     const server: any = {
-      name: this.config.name,
-      ip: this.config.ip,
-      password: this.config.password,
-      score: this.score,
-      time: this.time,
-      live: this.live,
+      model: {
+        id: this.model.id,
+        name: this.model.name,
+        ip: this.model.ip,
+        password: this.model.password,
+      },
       map: this.map,
-      paused: this.live && this.paused,
       players: {},
     };
 

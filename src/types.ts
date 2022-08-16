@@ -75,18 +75,6 @@ export namespace Config {
 
   export interface TF2 {
     maps: string[];
-    servers: TF2Server[];
-  }
-
-  export interface TF2Server {
-    name: string;
-    ip: string;
-    port?: number;
-    rcon: string;
-    password: string;
-    channels?: {
-      [team in TEAMS]: number;
-    }
   }
 }
 

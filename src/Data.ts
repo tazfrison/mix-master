@@ -1,14 +1,16 @@
 import config from 'config';
 import EventEmitter from 'events';
 import Draft from './Draft';
-import { createFakeServer, createFakeUser, FakeServer, FakeUser } from './fakes';
+import { createFakeUser, FakeUser } from './fakes';
 import Mumble from './Mumble';
 import TF2Server from './TF2Server';
 import User from './User';
 
 import { Sequelize } from 'sequelize-typescript';
 import { InferCreationAttributes } from 'sequelize/types';
+import { SequelizeStorage, Umzug } from 'umzug';
 import LogParser from './LogParser';
+import AggregatedClassStats from './models/AggregatedClassStats';
 import IPCheck from './models/IPCheck';
 import Log from './models/Log';
 import LogClassStats from './models/LogClassStats';
@@ -16,14 +18,14 @@ import LogMedicStats from './models/LogMedicStats';
 import LogPlayer from './models/LogPlayer';
 import Player from './models/Player';
 import Round from './models/Round';
+import Server from './models/Server';
 import VoiceAccount from './models/VoiceAccount';
-import AggregatedClassStats from './models/AggregatedClassStats';
 import { updateStats } from './Stats';
-import { SequelizeStorage, Umzug } from 'umzug';
+import AdvancedTF2Server from './AdvancedTF2Server';
 
 const adminList: string[] = config.get('roles.admin');
 
-const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck];
+const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck, Server];
 
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
@@ -50,7 +52,7 @@ declare global {
 class Data extends EventEmitter {
   users: { [id: number]: User } = {};
   ipMap: { [ip: string]: number } = {};
-  servers: { [ip: string]: TF2Server } = {};
+  servers: { [id: number]: TF2Server } = {};
   draft: Draft;
   mumble?: Mumble;
   constructor() {
@@ -137,17 +139,26 @@ class Data extends EventEmitter {
     return player.toJSON();
   }
 
-  fetchServer(ip: string) {
-    return this.servers[ip];
+  fetchServer(id: number) {
+    return this.servers[id];
   }
 
-  addServer(server: TF2Server) {
-    this.servers[server.config.ip] = server;
-    server.on('update', () => this.emit('servers/update', server));
-    server.on('disconnect', () => {
-      delete this.servers[server.config.ip];
-      server.removeAllListeners();
-      this.emit('servers/delete', server);
+  addServer(model: Server) {
+    let server: TF2Server;
+    if (model.advancedStats) {
+      server = new AdvancedTF2Server(model);
+    } else {
+      server = new TF2Server(model);
+    }
+
+    server.once('ready', () => {
+      this.servers[server.model.id] = server;
+      server.on('update', () => this.emit('servers/update', server));
+      server.on('disconnect', () => {
+        delete this.servers[server.model.id];
+        server.removeAllListeners();
+        this.emit('servers/delete', server);
+      });
     });
   }
 
@@ -182,7 +193,7 @@ class Data extends EventEmitter {
 
   async getState() {
     return {
-      servers: Object.values(this.servers).sort((a, b) => a.config.name.localeCompare(b.config.name)),
+      servers: Object.values(this.servers).sort((a, b) => a.model.name.localeCompare(b.model.name)),
       users: Object.values(this.users),
       draft: this.draft,
       logs: await Log.findAll(),
@@ -191,26 +202,16 @@ class Data extends EventEmitter {
     } as any;
   }
 
-  async fakes(users: number, servers: number) {
+  async fakes(users: number, _servers: number) {
     for (let [id, user] of Object.entries(this.users)) {
       if (user instanceof FakeUser) {
         user.removeAllListeners();
         delete this.users[parseInt(id)];
       }
     }
-    for (let [ip, server] of Object.entries(this.servers)) {
-      if (server instanceof FakeServer) {
-        server.removeAllListeners();
-        delete this.servers[ip];
-      }
-    }
     const players = await Player.findAll();
     for (let i = 0; i < users; ++i) {
       createFakeUser(players);
-    }
-
-    for (let i = 1; i <= servers; ++i) {
-      createFakeServer(i);
     }
   }
 }
