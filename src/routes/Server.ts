@@ -1,9 +1,7 @@
 import { Router } from 'express';
-import { STATUS_CODES } from 'http';
 import { InferAttributes } from 'sequelize/types';
 import data from '../Data';
 import Server from '../models/Server';
-import TF2Server from '../TF2Server';
 import { isAdmin } from './helpers';
 
 const router = Router();

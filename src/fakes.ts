@@ -1,9 +1,9 @@
+import config from 'config';
 import data from './Data';
-import TF2Server from './TF2Server';
+import AggregatedClassStats from './models/AggregatedClassStats';
+import Player from './models/Player';
 import { CLASSES, SKILLS } from './types';
 import User from './User';
-import config from 'config';
-import Player from './models/Player';
 
 const TEAM_CLASSES = [
   CLASSES.demoman,
@@ -16,12 +16,11 @@ const TEAM_CLASSES = [
 
 export class FakeUser extends User {
   tags: { [className in CLASSES]?: SKILLS };
-  constructor(ip: string, player?: Player) {
+  constructor(ip: string, player: Player, className: CLASSES) {
     super(ip);
     this.player = player;
     this.name = player.name;
     this.validated = getRandom([true, true, true, true, true, false, undefined]);
-    const className = getRandom(TEAM_CLASSES);
     this.tags = {
       [className]: parseInt(getRandom(Object.keys(SKILLS).filter(a => !isNaN(Number(a))))),
     }
@@ -105,9 +104,19 @@ function getRandom<T>(arr: T[]) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-export const createFakeUser = (players: Player[]) => {
+export const createFakeUser = async () => {
+  const className = getRandom(TEAM_CLASSES);
+  const players = await AggregatedClassStats.findAll({
+    where: {
+      className,
+    },
+    include: [{
+      model: Player,
+      required: true,
+    }]
+  });
   const player = getRandom(players);
-  const user = new FakeUser(Math.random().toString(16).slice(2, 10), player);
+  const user = new FakeUser(Math.random().toString(16).slice(2, 10), player.player, className);
   data().users[user.id] = user;
 }
 

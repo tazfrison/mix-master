@@ -1,7 +1,9 @@
 import { ID as SteamID } from '@node-steam/id';
 import axios from 'axios';
+import { Sequelize } from 'sequelize-typescript';
 import { InferCreationAttributes, Transaction } from 'sequelize/types';
 import { sequelize } from './Data';
+import AggregatedClassStats from './models/AggregatedClassStats';
 import Log from './models/Log';
 import LogClassStats from './models/LogClassStats';
 import LogMedicStats from './models/LogMedicStats';
@@ -11,6 +13,52 @@ import Round from './models/Round';
 import { CLASSES, LogJson, TEAMS } from './types';
 
 const valid = (num: number, denom: number) => ((denom === 0) ? 0 : (num / denom));
+
+const GLOBAL_AGGREGATION_QUERY = `SELECT
+lcs.className,
+SUM((lcs.kills - avg.kills) * (lcs.kills - avg.kills)) / (avg.total - 1) AS kills_sd,
+SUM((lcs.assists - avg.assists) * (lcs.assists - avg.assists)) / (avg.total - 1) AS assists_sd,
+SUM((lcs.deaths - avg.deaths) * (lcs.deaths - avg.deaths)) / (avg.total - 1) AS deaths_sd,
+SUM((lcs.damage - avg.damage) * (lcs.damage - avg.damage)) / (avg.total - 1) AS damage_sd,
+SUM((lcs.ka_d - avg.ka_d) * (lcs.ka_d - avg.ka_d)) / (avg.total - 1) AS ka_d_sd,
+SUM((lcs.k_d - avg.k_d) * (lcs.k_d - avg.k_d)) / (avg.total - 1) AS k_d_sd,
+SUM((lcs.k_m - avg.k_m) * (lcs.k_m - avg.k_m)) / (avg.total - 1) AS k_m_sd,
+SUM((lcs.a_m - avg.a_m) * (lcs.a_m - avg.a_m)) / (avg.total - 1) AS a_m_sd,
+SUM((lcs.de_m - avg.de_m) * (lcs.de_m - avg.de_m)) / (avg.total - 1) AS de_m_sd,
+SUM((lcs.da_m - avg.da_m) * (lcs.da_m - avg.da_m)) / (avg.total - 1) AS da_m_sd,
+SUM((lcs.playtime - avg.playtime) * (lcs.playtime - avg.playtime)) / (avg.total - 1) AS playtime_sd,
+avg.total AS total,
+SUM(lcs.playtime) AS playtime,
+avg.kills AS kills,
+avg.assists AS assists,
+avg.deaths AS deaths,
+avg.damage AS damage,
+avg.ka_d AS ka_d,
+avg.k_d AS k_d,
+avg.k_m AS k_m,
+avg.a_m AS a_m,
+avg.de_m AS de_m,
+avg.da_m AS da_m
+FROM LogClassStats AS lcs,
+(
+  SELECT className,
+    COUNT(className) AS total,
+    AVG(playtime) AS playtime,
+    AVG(kills) AS kills,
+    AVG(assists) AS assists,
+    AVG(deaths) AS deaths,
+    AVG(damage) AS damage,
+    AVG(ka_d) AS ka_d,
+    AVG(k_d) AS k_d,
+    AVG(k_m) AS k_m,
+    AVG(a_m) AS a_m,
+    AVG(de_m) AS de_m,
+    AVG(da_m) AS da_m
+  FROM LogClassStats
+  GROUP BY className
+) AS avg
+WHERE lcs.className = avg.className
+GROUP BY avg.className;`;
 
 export default class LogParser {
   logJson?: LogJson.Root;
@@ -25,6 +73,7 @@ export default class LogParser {
   logPlayerModels: { [steamId: string]: LogPlayer } = {};
   logClassStatModels: { [steamId: string]: { [classIndex in CLASSES]?: LogClassStats } } = {};
   logMedicStatModels: { [steamId: string]: LogMedicStats } = {};
+  aggregatedClassStatModels: { [playerId: number]: { [classIndex in CLASSES]?: AggregatedClassStats } } = {};
 
   constructor(public logId: number) { }
 
@@ -71,6 +120,7 @@ export default class LogParser {
 
       await this.ensureLogClassStats(classStatsJsonMap);
       await this.ensureLogMedicStats(medicStatsJsonMap);
+      await this.updateAggregatedClassStats();
     } catch (e) {
       await this.transaction.rollback();
       throw e;
@@ -439,6 +489,165 @@ export default class LogParser {
       })).forEach(logMedicStatsModel => {
         const playerModel = this.playerModelsById[logMedicStatsModel.playerId];
         this.logMedicStatModels[playerModel.steamId] = logMedicStatsModel;
+      });
+    }
+  }
+
+  async updateAggregatedClassStats() {
+    const playerIds = Object.keys(this.playerModelsById);
+
+    (await AggregatedClassStats.findAll({
+      where: {
+        playerId: playerIds,
+      },
+      transaction: this.transaction,
+    })).forEach(aggregatedClassStatsModel => {
+      if (!this.aggregatedClassStatModels[aggregatedClassStatsModel.playerId]) {
+        this.aggregatedClassStatModels[aggregatedClassStatsModel.playerId] = {}
+      }
+      this.aggregatedClassStatModels[aggregatedClassStatsModel.playerId][aggregatedClassStatsModel.className] = aggregatedClassStatsModel;
+    });
+
+    const newAggregatedClassStats: InferCreationAttributes<AggregatedClassStats>[] = [];
+    const logClassStats = await LogClassStats.findAll({
+      where: {
+        playerId: playerIds,
+      },
+      transaction: this.transaction,
+      group: [
+        Sequelize.col('LogClassStats.className'),
+        Sequelize.col('LogClassStats.playerId')
+      ],
+      attributes: [
+        [Sequelize.col('LogClassStats.className'), 'className'],
+        [Sequelize.col('LogClassStats.playerId'), 'playerId'],
+        [Sequelize.fn('count', Sequelize.col('LogClassStats.className')), 'count'],
+        [Sequelize.fn('sum', Sequelize.literal('CASE Log.winner WHEN LogPlayer.team THEN 1 ELSE 0 END')), 'wins'],
+        [Sequelize.fn('count', Sequelize.literal('Log.winner')), 'nonTies'],
+        [Sequelize.fn('sum', Sequelize.col('LogClassStats.playtime')), 'playtime'],
+        [Sequelize.fn('sum', Sequelize.col('LogClassStats.kills')), 'kills'],
+        [Sequelize.fn('sum', Sequelize.col('LogClassStats.assists')), 'assists'],
+        [Sequelize.fn('sum', Sequelize.col('LogClassStats.deaths')), 'deaths'],
+        [Sequelize.fn('sum', Sequelize.col('LogClassStats.damage')), 'damage'],
+        [Sequelize.fn('avg', Sequelize.col('LogClassStats.ka_d')), 'ka_d'],
+        [Sequelize.fn('avg', Sequelize.col('LogClassStats.k_d')), 'k_d'],
+        [Sequelize.fn('avg', Sequelize.col('LogClassStats.k_m')), 'k_m'],
+        [Sequelize.fn('avg', Sequelize.col('LogClassStats.a_m')), 'a_m'],
+        [Sequelize.fn('avg', Sequelize.col('LogClassStats.de_m')), 'de_m'],
+        [Sequelize.fn('avg', Sequelize.col('LogClassStats.da_m')), 'da_m'],
+      ],
+      include: [Log, LogPlayer],
+    });
+
+    for (const logClassStat of logClassStats) {
+      const count = logClassStat.get('count') as number;
+      const wins = logClassStat.get('wins') as number;
+      const nonTies = logClassStat.get('nonTies') as number;
+      const aggregate: InferCreationAttributes<AggregatedClassStats> = {
+        count,
+        wins,
+        losses: nonTies - wins,
+        className: logClassStat.className,
+        playerId: logClassStat.playerId,
+        kills: logClassStat.kills,
+        assists: logClassStat.assists,
+        deaths: logClassStat.deaths,
+        damage: logClassStat.damage,
+        playtime: logClassStat.playtime,
+        ka_d: logClassStat.ka_d,
+        k_d: logClassStat.k_d,
+        k_m: logClassStat.k_m,
+        a_m: logClassStat.a_m,
+        de_m: logClassStat.de_m,
+        da_m: logClassStat.da_m,
+      }
+
+      if (!this.aggregatedClassStatModels[logClassStat.playerId]) {
+        this.aggregatedClassStatModels[logClassStat.playerId] = {}
+      }
+      if (this.aggregatedClassStatModels[logClassStat.playerId][logClassStat.className]) {
+        await this.aggregatedClassStatModels[logClassStat.playerId][logClassStat.className].setAttributes(aggregate).save({ transaction: this.transaction });
+      } else {
+        newAggregatedClassStats.push(aggregate);
+      }
+    };
+
+    const averages: {[className in CLASSES]?: AggregatedClassStats} = {};
+    const deviations: {[className in CLASSES]?: AggregatedClassStats} = {};
+    (await AggregatedClassStats.findAll({
+      where: { playerId: null },
+      transaction: this.transaction,
+    })).forEach(globalStats => {
+      if (globalStats.count === 0) {
+        averages[globalStats.className] = globalStats;
+      } else {
+        deviations[globalStats.className] = globalStats;
+      }
+    });
+
+    const [results] = await sequelize.query(GLOBAL_AGGREGATION_QUERY, { transaction: this.transaction });
+
+    for(const row of results as any[]) {
+      const className: CLASSES = row.className;
+      const average: InferCreationAttributes<AggregatedClassStats> = {
+        count: row.total,
+        wins: 0,
+        losses: 0,
+        className: className,
+        kills: row.kills,
+        assists: row.assists,
+        deaths: row.deaths,
+        damage: row.damage,
+        playtime: row.playtime,
+        ka_d: row.ka_d,
+        k_d: row.k_d,
+        k_m: row.k_m,
+        a_m: row.a_m,
+        de_m: row.de_m,
+        da_m: row.da_m,
+      };
+      const deviation: InferCreationAttributes<AggregatedClassStats> = {
+        count: 0,
+        wins: 0,
+        losses: 0,
+        className: className,
+        kills: Math.sqrt(row.kills_sd),
+        assists: Math.sqrt(row.assists_sd),
+        deaths: Math.sqrt(row.deaths_sd),
+        damage: Math.sqrt(row.damage_sd),
+        playtime: Math.sqrt(row.playtime_sd),
+        ka_d: Math.sqrt(row.ka_d_sd),
+        k_d: Math.sqrt(row.k_d_sd),
+        k_m: Math.sqrt(row.k_m_sd),
+        a_m: Math.sqrt(row.a_m_sd),
+        de_m: Math.sqrt(row.de_m_sd),
+        da_m: Math.sqrt(row.da_m_sd),
+      };
+      if (averages[className]) {
+        await averages[className].setAttributes(average).save({ transaction: this.transaction });
+      } else {
+        newAggregatedClassStats.push(average);
+      }
+      if (deviations[className]) {
+        await deviations[className].setAttributes(deviation).save({ transaction: this.transaction });
+      } else {
+        newAggregatedClassStats.push(deviation);
+      }
+    };
+
+    if (newAggregatedClassStats.length > 0) {
+      await AggregatedClassStats.bulkCreate(newAggregatedClassStats, { transaction: this.transaction });
+
+      (await AggregatedClassStats.findAll({
+        where: {
+          playerId: playerIds,
+        },
+        transaction: this.transaction,
+      })).forEach(aggregatedClassStatsModel => {
+        if (!this.aggregatedClassStatModels[aggregatedClassStatsModel.playerId]) {
+          this.aggregatedClassStatModels[aggregatedClassStatsModel.playerId] = {}
+        }
+        this.aggregatedClassStatModels[aggregatedClassStatsModel.playerId][aggregatedClassStatsModel.className] = aggregatedClassStatsModel;
       });
     }
   }

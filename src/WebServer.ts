@@ -1,6 +1,6 @@
 import config from 'config';
 import cors from 'cors';
-import express, { Application, RequestHandler } from 'express';
+import express, { Application } from 'express';
 import http from 'http';
 import path from 'path';
 import socketio from 'socket.io';
@@ -12,7 +12,6 @@ import passport from 'passport';
 import SteamStrategy from 'passport-steam';
 
 import SequelizeStore from 'connect-session-sequelize';
-import { fetch } from './Stats';
 
 const store = new (SequelizeStore(session.Store))({
   db: sequelize,
@@ -104,10 +103,8 @@ export default class WebServer {
     });
 
     [
-      'users/update', 'users/delete',
-      'servers/update', 'servers/delete',
-      'draft/update',
-      'logs/update',
+      'update',
+      'delete',
     ].forEach(event => {
       data().on(event, data => {
         this.sockets.forEach(socket => {

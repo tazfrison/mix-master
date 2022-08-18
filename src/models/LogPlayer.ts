@@ -1,10 +1,24 @@
 import { STRING } from 'sequelize';
-import { BelongsTo, Column, ForeignKey, HasMany, HasOne, Model, Table } from 'sequelize-typescript';
+import { BelongsTo, Column, ForeignKey, HasMany, HasOne, Model, Scopes, Table } from 'sequelize-typescript';
 import { LogJson, TEAMS } from '../types';
 import Log from './Log';
 import LogClassStats from './LogClassStats';
 import LogMedicStats from './LogMedicStats';
 import Player from './Player';
+import { Sequelize } from 'sequelize-typescript';
+
+@Scopes(() => ({
+  playerCounts: {
+    include: [Log],
+    group: ['PlayerId'],
+    attributes: [
+      'PlayerId',
+      [Sequelize.fn('COUNT', 'PlayerId'), 'total'],
+      [Sequelize.fn('sum', Sequelize.literal('CASE Log.winner WHEN LogPlayer.team THEN 1 ELSE 0 END')), 'wins'],
+      [Sequelize.fn('count', Sequelize.literal('Log.winner')), 'nonTies'],
+    ]
+  }
+}))
 
 @Table({
   timestamps: false,

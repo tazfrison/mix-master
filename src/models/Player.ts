@@ -1,7 +1,22 @@
-import { Column, Default, HasMany, Model, Table } from 'sequelize-typescript';
+import { Column, Default, HasMany, Model, Scopes, Table } from 'sequelize-typescript';
+import AggregatedClassStats from './AggregatedClassStats';
+import Log from './Log';
 import LogClassStats from './LogClassStats';
 import LogMedicStats from './LogMedicStats';
 import LogPlayer from './LogPlayer';
+
+@Scopes(() => ({
+  withStats: {
+    include: [AggregatedClassStats, {
+      model: LogPlayer,
+      include: [LogMedicStats, Log, {
+        model: LogClassStats,
+        separate: true,
+        order: [['playtime', 'DESC']],
+      }]
+    }]
+  }
+}))
 
 @Table({
   timestamps: false,
@@ -25,6 +40,9 @@ export default class Player extends Model {
 
   @HasMany(() => LogClassStats)
   logClassStats?: LogClassStats[];
+
+  @HasMany(() => AggregatedClassStats)
+  aggregatedClassStats?: AggregatedClassStats[];
 
   @HasMany(() => LogMedicStats)
   logMedicStats?: LogMedicStats[];

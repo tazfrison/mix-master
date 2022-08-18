@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import data from '../Data';
 import Server from '../models/Server';
-import { fetch } from '../Stats';
 
-import ServerRouter from './Server';
-import LogsRouter from './Logs';
+import AggregatedClassStats from '../models/AggregatedClassStats';
 import { isAdmin } from './helpers';
+import LogsRouter from './Logs';
+import ServerRouter from './Server';
+import Player from '../models/Player';
 
 const router = Router();
 
@@ -17,8 +18,21 @@ router.get('/state', async (req, res) => {
   res.json(state);
 });
 
+router.get('/players/:id', async (req, res) => {
+  res.json(await Player.scope('withStats').findOne({where: {
+    steamId: req.params.id,
+  }}));
+});
+
+router.get('/players', async (req, res) => {
+  const steamIds = req.query.steamIds as string[];
+  res.json(await Player.scope('withStats').findAll({where: {
+    steamId: steamIds,
+  }}));
+});
+
 router.get('/stats', async (_req, res) => {
-  res.json(await fetch());
+  res.json(await AggregatedClassStats.scope('globals').findAll());
 });
 
 router.post('/fakes',// isAdmin,

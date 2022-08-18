@@ -1,7 +1,11 @@
 import { FLOAT } from 'sequelize';
-import { BelongsTo, Column, ForeignKey, Model, Table } from 'sequelize-typescript';
+import { BelongsTo, Column, ForeignKey, Model, Scopes, Table } from 'sequelize-typescript';
 import { CLASSES } from '../types';
 import Player from './Player';
+
+@Scopes(() => ({
+  globals: { where: { playerId: null } }
+}))
 
 @Table
 export default class AggregatedClassStats extends Model {

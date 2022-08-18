@@ -9,6 +9,7 @@ import User from './User';
 import { Sequelize } from 'sequelize-typescript';
 import { InferCreationAttributes } from 'sequelize/types';
 import { SequelizeStorage, Umzug } from 'umzug';
+import AdvancedTF2Server from './AdvancedTF2Server';
 import LogParser from './LogParser';
 import AggregatedClassStats from './models/AggregatedClassStats';
 import IPCheck from './models/IPCheck';
@@ -20,8 +21,6 @@ import Player from './models/Player';
 import Round from './models/Round';
 import Server from './models/Server';
 import VoiceAccount from './models/VoiceAccount';
-import { updateStats } from './Stats';
-import AdvancedTF2Server from './AdvancedTF2Server';
 
 const adminList: string[] = config.get('roles.admin');
 
@@ -59,7 +58,7 @@ class Data extends EventEmitter {
     super();
 
     this.draft = new Draft();
-    this.draft.on('update', () => this.emit('draft/update', this.draft));
+    this.draft.on('update', () => this.emit('update', { type: 'draft', data: this.draft }));
   }
 
   async initModels() {
@@ -79,37 +78,12 @@ class Data extends EventEmitter {
     }
   }
 
-  async fetchPlayer(steamId: string) {
-    return Player.findOne({
-      where: {
-        steamId,
-      },
-      include: [{
-        model: LogPlayer,
-        include: [Log, {
-          model: LogClassStats,
-          separate: true,
-          order: [['playtime', 'DESC']],
-        }],
-      }],
-    });
-  }
-
-  async fetchPlayers() {
-    return LogPlayer.findAll({
-      include: [Player],
-      group: ['PlayerId'],
-      attributes: ['PlayerId', [Sequelize.fn('COUNT', 'PlayerId'), 'LogCount']]
-    });
-  }
-
   async refreshLogs() {
     const logs = await Log.findAll();
     for (const log of logs) {
       console.log('Refreshing ' + log.id);
       await this.importLog(log.id);
     }
-    await updateStats();
     return { logs: logs.length };
   }
 
@@ -117,9 +91,7 @@ class Data extends EventEmitter {
     const parser = new LogParser(logId);
     await parser.import();
     const log = await Log.scope('full').findByPk(logId);
-    const playerIds = log.players.map(player => player.id);
-    await(updateStats(playerIds));
-    this.emit('logs/update', log);
+    this.emit('update', { type: 'log', data: log });
     return log;
   }
 
@@ -153,11 +125,11 @@ class Data extends EventEmitter {
 
     server.once('ready', () => {
       this.servers[server.model.id] = server;
-      server.on('update', () => this.emit('servers/update', server));
+      server.on('update', () => this.emit('update', { type: 'server', data: server }));
       server.on('disconnect', () => {
         delete this.servers[server.model.id];
         server.removeAllListeners();
-        this.emit('servers/delete', server);
+        this.emit('delete', { type: 'server', data: server });
       });
     });
   }
@@ -178,9 +150,9 @@ class Data extends EventEmitter {
     let user = this.fetchUserByIP(ip);
     if (!user) {
       user = new User(ip);
-      user.on('update', () => this.emit('users/update', user));
+      user.on('update', () => this.emit('update', { type: 'user', data: user }));
       user.on('disconnect', () => {
-        this.emit('users/delete', user);
+        this.emit('delete', { type: 'user', data: user });
         user.removeAllListeners();
         delete this.users[user.id];
         delete this.ipMap[user.ip];
@@ -192,13 +164,23 @@ class Data extends EventEmitter {
   }
 
   async getState() {
+    const users = Object.values(this.users);
+    const steamIds: string[] = [];
+    users.forEach(user => {
+      if (user.player) {
+        steamIds.push(user.player.steamId);
+      }
+    });
     return {
       servers: Object.values(this.servers).sort((a, b) => a.model.name.localeCompare(b.model.name)),
-      users: Object.values(this.users),
+      users,
       draft: this.draft,
       logs: await Log.findAll(),
-      players: await this.fetchPlayers(),
       maps: config.get('tf2.maps'),
+      globalStats: await AggregatedClassStats.scope('globals').findAll(),
+      players: await Player.scope('withStats').findAll({where: {
+        steamId: steamIds,
+      }}),
     } as any;
   }
 
@@ -209,9 +191,8 @@ class Data extends EventEmitter {
         delete this.users[parseInt(id)];
       }
     }
-    const players = await Player.findAll();
     for (let i = 0; i < users; ++i) {
-      createFakeUser(players);
+      await createFakeUser();
     }
   }
 }
