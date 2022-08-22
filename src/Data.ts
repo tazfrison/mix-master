@@ -2,12 +2,12 @@ import config from 'config';
 import EventEmitter from 'events';
 import Draft from './Draft';
 import { createFakeUser, FakeUser } from './fakes';
-import Mumble from './Mumble';
-import TF2Server from './TF2Server';
+import Mumble, { MumbleUser } from './Mumble';
+import TF2Server, { TF2Player } from './TF2Server';
 import User from './User';
 
 import { Sequelize } from 'sequelize-typescript';
-import { InferCreationAttributes } from 'sequelize/types';
+import { InferCreationAttributes, WhereAttributeHash, WhereOptions } from 'sequelize/types';
 import { SequelizeStorage, Umzug } from 'umzug';
 import AdvancedTF2Server from './AdvancedTF2Server';
 import LogParser from './LogParser';
@@ -21,10 +21,12 @@ import Player from './models/Player';
 import Round from './models/Round';
 import Server from './models/Server';
 import VoiceAccount from './models/VoiceAccount';
+import UserModel from './models/User';
+import checkIp from './IPChecker';
 
 const adminList: string[] = config.get('roles.admin');
 
-const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck, Server];
+const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck, Server, UserModel];
 
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
@@ -35,18 +37,6 @@ export const sequelize = new Sequelize({
     max: 10
   },
 });
-
-declare global {
-  namespace Express {
-    interface User {
-      id: number;
-      steamId: string;
-      avatar: string;
-      name: string;
-      admin: boolean;
-    }
-  }
-}
 
 class Data extends EventEmitter {
   users: { [id: number]: User } = {};
@@ -84,6 +74,7 @@ class Data extends EventEmitter {
       console.log('Refreshing ' + log.id);
       await this.importLog(log.id);
     }
+    console.log('Refresh done');
     return { logs: logs.length };
   }
 
@@ -102,10 +93,13 @@ class Data extends EventEmitter {
       name: profile.personaname,
       admin: adminList.indexOf(steamId) !== -1,
       avatar: profile.avatar,
+      coach: false,
     };
     if (!player) {
       player = await Player.create(attributes);
     } else {
+      attributes.admin = player.admin;
+      attributes.coach = player.coach;
       player.setAttributes(attributes).save();
     }
     return player.toJSON();
@@ -146,10 +140,93 @@ class Data extends EventEmitter {
     return this.users[id];
   }
 
-  upsertUser(ip: string) {
+  async upsertUser(ip: string, mumble?: MumbleUser, tf2?: TF2Player) {
+    const findUserModel = async (voice?: VoiceAccount, player?: Player) => {
+      if (!voice && !player) {
+        throw new Error('Nothing to create user from');
+      }
+      let where: WhereAttributeHash<UserModel> = {};
+      if (voice) {
+        where.voiceAccountId = voice.id;
+      }
+      if (player) {
+        where.playerId = player.id;
+      }
+      const model = await UserModel.findOne({
+        where,
+        order: [['updatedAt', 'DESC']]
+      });
+      return model;
+    };
+
+    const createUserModel = async (ipCheck: IPCheck, voice?: VoiceAccount, player?: Player) => {
+      if (!voice && !player) {
+        throw new Error('Nothing to create user from');
+      }
+      const attrs: InferCreationAttributes<UserModel> = {
+        name: voice?.name || player.name,
+        ipCheckId: ipCheck.id,
+      }
+      if (voice) {
+        attrs.voiceAccountId = voice.id;
+      }
+      if (player) {
+        attrs.playerId = player.id;
+      }
+      const model = await UserModel.create(attrs);
+      await model.reload();
+      return model;
+    };
+
     let user = this.fetchUserByIP(ip);
     if (!user) {
-      user = new User(ip);
+      const ipCheck = await checkIp(ip);
+      let model = await findUserModel(mumble?.voice, tf2?.player);
+      if (!model) {
+        model = await createUserModel(ipCheck, mumble?.voice, tf2?.player);
+      } else {
+        await model.setAttributes({ ipCheckId: ipCheck.id }).save();
+      }
+      user = new User(model, ipCheck);
+      this.users[model.id] = user;
+      this.ipMap[ip] = model.id;
+      user.on('change', async ({ voice, player }: { voice: VoiceAccount, player: Player}) => {
+        //Check if model can be updated
+        if (voice.id === user.model.voiceAccountId && player.id === user.model.playerId) {
+          //Nothing to do
+          await user.model.setAttributes({ ipCheckId: ipCheck.id }).save();
+          return;
+        } else if ((user.model.voiceAccountId && user.model.voiceAccountId !== voice.id) || (user.model.playerId && user.model.playerId !== player.id)) {
+          //Incompatible
+          this.emit('delete', { type: 'user', data: user });
+          delete this.users[user.id];
+          delete this.ipMap[user.ip];
+          let model = await findUserModel(voice, player);
+          if (!model) {
+            model = await createUserModel(ipCheck, voice, player);
+          } else {
+            await model.setAttributes({ ipCheckId: ipCheck.id }).save();
+          }
+          user.updateUser(model);
+          this.users[model.id] = user;
+          this.ipMap[ip] = model.id;
+          return;
+        } else if (!user.model.voiceAccountId && user.model.playerId === player.id) {
+          //Merge with existing voice user
+          const model = await findUserModel(voice, undefined);
+          if (model) {
+            await model.destroy();
+          }
+        } else if (!user.model.playerId && user.model.voiceAccountId === voice.id) {
+          //Merge with existing player user
+          const model = await findUserModel(undefined, player);
+          if (model) {
+            await model.destroy();
+          }
+        }
+        await user.model.setAttributes({ voiceAccountId: voice.id, playerId: player.id }).save();
+        await user.model.reload();
+      });
       user.on('update', () => this.emit('update', { type: 'user', data: user }));
       user.on('disconnect', () => {
         this.emit('delete', { type: 'user', data: user });
@@ -157,18 +234,26 @@ class Data extends EventEmitter {
         delete this.users[user.id];
         delete this.ipMap[user.ip];
       });
-      this.users[user.id] = user;
-      this.ipMap[ip] = user.id;
+    }
+    if (mumble) {
+      user.setMumble(mumble);
+    }
+    if (tf2) {
+      user.setTf2(tf2);
     }
     return user;
+  }
+
+  send(event: string, data: any) {
+    this.emit(event, data);
   }
 
   async getState() {
     const users = Object.values(this.users);
     const steamIds: string[] = [];
     users.forEach(user => {
-      if (user.player) {
-        steamIds.push(user.player.steamId);
+      if (user.model.player) {
+        steamIds.push(user.model.player.steamId);
       }
     });
     return {
@@ -178,9 +263,11 @@ class Data extends EventEmitter {
       logs: await Log.findAll(),
       maps: config.get('tf2.maps'),
       globalStats: await AggregatedClassStats.scope('globals').findAll(),
-      players: await Player.scope('withStats').findAll({where: {
-        steamId: steamIds,
-      }}),
+      players: await Player.scope('withStats').findAll({
+        where: {
+          steamId: steamIds,
+        }
+      }),
     } as any;
   }
 

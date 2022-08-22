@@ -276,6 +276,7 @@ export default class LogParser {
         steamId,
         name,
         admin: false,
+        coach: false,
       };
       if (this.playerModels[steamId]) {
         playerAttributes.admin = this.playerModels[steamId].admin;

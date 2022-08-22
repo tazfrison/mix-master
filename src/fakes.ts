@@ -1,7 +1,9 @@
 import config from 'config';
 import data from './Data';
 import AggregatedClassStats from './models/AggregatedClassStats';
+import IPCheck from './models/IPCheck';
 import Player from './models/Player';
+import UserModel from './models/User';
 import { CLASSES, SKILLS } from './types';
 import User from './User';
 
@@ -14,13 +16,17 @@ const TEAM_CLASSES = [
   CLASSES.soldier,
 ];
 
+let ID = -1;
+
 export class FakeUser extends User {
   tags: { [className in CLASSES]?: SKILLS };
+  validated: boolean;
+  player: Player;
   constructor(ip: string, player: Player, className: CLASSES) {
-    super(ip);
+    const user = new UserModel({ id: ID--, player });
+    const ipCheck = new IPCheck({ ip, validated: getRandom([true, true, true, true, true, false, undefined]) });
+    super(user, ipCheck);
     this.player = player;
-    this.name = player.name;
-    this.validated = getRandom([true, true, true, true, true, false, undefined]);
     this.tags = {
       [className]: parseInt(getRandom(Object.keys(SKILLS).filter(a => !isNaN(Number(a))))),
     }
@@ -29,8 +35,8 @@ export class FakeUser extends User {
   toJSON() {
     const user: any = {
       id: this.id,
-      name: this.name,
-      validated: this.validated,
+      name: this.player.name,
+      validated: this.check.validated,
       player: {
         id: this.player.id,
         steamId: this.player.steamId,

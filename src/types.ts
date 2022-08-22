@@ -1,3 +1,31 @@
+import { Session, SessionData } from 'express-session';
+
+declare module 'http' {
+  interface IncomingMessage {
+    session: Session & Partial<SessionData>
+  }
+}
+
+declare module 'express-session' {
+  interface SessionData {
+    passport: {
+      user: Express.User
+    }
+  }
+}
+
+declare global {
+  namespace Express {
+    interface User {
+      id: number;
+      steamId: string;
+      avatar: string;
+      name: string;
+      admin: boolean;
+    }
+  }
+}
+
 export enum DRAFT_TYPE {
   COACHED_MIX,
 }

@@ -1,8 +1,14 @@
 import { Router } from 'express';
 import data from '../Data';
+import User from '../models/User';
 import { isAdmin } from './helpers';
 
 const router = Router();
+
+router.get('/', isAdmin,
+  async (_req, res) => {
+    res.json(await User.findAll());
+  });
 
 router.use('/:id', async (req, res, next) => {
   if (!req.params.id) {
@@ -25,7 +31,7 @@ const runAction = (target: any, action: string, body: any) => {
 router.post('/:id/mumble/:action', isAdmin,
   (req, res, next) => {
     try {
-      res.json(runAction(res.locals.user.mumble, req.params.action, req.body));
+      res.json(runAction(res.locals.user?.mumble, req.params.action, req.body));
     } catch (e) {
       next(e.message);
     }
@@ -34,7 +40,7 @@ router.post('/:id/mumble/:action', isAdmin,
 router.post('/:id/tf2/:action', isAdmin,
   (req, res, next) => {
     try {
-      res.json(runAction(res.locals.user.tf2, req.params.action, req.body));
+      res.json(runAction(res.locals.user?.tf2, req.params.action, req.body));
     } catch (e) {
       next(e.message);
     }

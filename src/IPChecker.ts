@@ -4,7 +4,6 @@ import { URL } from 'url';
 import data from './Data';
 import IPCheck from './models/IPCheck';
 
-const EXPIRATION = 6 * 60 * 60 * 1000; //6 Hours
 const MAX_LOAD = 12;
 const EMAIL: string = config.get('ipCheck.email');
 const CHECK_URL: string = config.get('ipCheck.url');
@@ -21,28 +20,22 @@ async function shiftBacklog() {
   await data().fetchUserByIP(ip).validate();
 }
 
-async function getIP(ip: string) {
-  const model = await IPCheck.findOne({ where: { ip } });
-  if (!model) {
-    return undefined;
+export default async function checkIp(ip: string) {
+  let model = await IPCheck.findOne({ where: { ip } });
+  if (model && !model.expired) {
+    return model;
   }
-  const expiration = (new Date(model.updatedAt)).getTime() + EXPIRATION;
-  if (expiration < (new Date()).getTime()) {
-    model.destroy();
-    return undefined;
-  }
-  return model;
-}
 
-export default async function checkIp(ip: string): Promise<boolean | undefined> {
-  const model = await getIP(ip);
-  if (model) {
-    return model.validated;
+  if (!model) {
+    model = await IPCheck.create({ ip });
+  } else {
+    model.setDataValue('validated', undefined);
+    await model.save();
   }
 
   if (load > MAX_LOAD) {
     backlog.push(ip);
-    return undefined;
+    return model;
   }
 
   const url = new URL(CHECK_URL);
@@ -56,14 +49,20 @@ export default async function checkIp(ip: string): Promise<boolean | undefined> 
     ++load;
     const response = await axios(url.toString());
     setTimeout(shiftBacklog, 60000);
+    let validated: boolean = false;
     if (response.data.status === 'success') {
-      const model = await IPCheck.create({ ip, validated: parseInt(response.data.result) !== 1});
-      return model.validated;
+      validated = parseInt(response.data.result) !== 1;
     } else if (response.data.status === 'error' && response.data.result === '-3') {
-      const model = await IPCheck.create({ ip, validated: true});
-      return model.validated;
+      validated = true;
+    } else {
+      throw new Error(JSON.stringify(response.data));
     }
-    throw new Error(JSON.stringify(response.data));
+    if (!model) {
+      model = await IPCheck.create({ ip, validated });
+    } else {
+      await model.setAttributes({ validated }).save();
+    }
+    return model;
   } catch (e) {
     if (e.response && e.response.status === 429) {
       console.log('Too Many Requests');

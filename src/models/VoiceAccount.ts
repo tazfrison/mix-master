@@ -1,5 +1,5 @@
-import { BelongsTo, Column, ForeignKey, Model, Table } from 'sequelize-typescript';
 import { STRING } from 'sequelize';
+import { BelongsTo, Column, ForeignKey, Model, Table } from 'sequelize-typescript';
 import { VOICE } from '../types';
 import Player from './Player';
 
@@ -7,12 +7,6 @@ import Player from './Player';
   timestamps: false,
 })
 export default class VoiceAccount extends Model {
-  @ForeignKey(() => Player)
-  playerId?: number;
-
-  @BelongsTo(() => Player)
-  player?: Player;
-
   @Column
   hash: string;
 

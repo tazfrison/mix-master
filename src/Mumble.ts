@@ -3,6 +3,8 @@ import { Client, connect, User as BaseUser } from 'mumble';
 import data from './Data';
 import User from './User';
 import config from 'config';
+import VoiceAccount from './models/VoiceAccount';
+import { VOICE } from './types';
 
 export interface UserJoined {
   certificate: string;
@@ -12,9 +14,19 @@ export interface UserJoined {
   user: BaseUser;
 }
 
-export class MumbleUser {
-  constructor(public user: BaseUser) {
+export class MumbleUser extends Events.EventEmitter {
+  user: BaseUser;
+  voice: VoiceAccount;
+  constructor(user: BaseUser, voice: VoiceAccount) {
+    super();
 
+    this.user = user;
+    this.voice = voice;
+    const notify = () => this.emit('update');
+    user.on('move', notify);
+    user.on('mute', notify);
+    user.on('deaf', notify);
+    user.on('disconnect', () => this.emit('disconnect'));
   }
 
   get name() {
@@ -71,7 +83,6 @@ export default class Mumble extends Events.EventEmitter {
   client: Client;
   url: string;
   options: any;
-  sessionMap: { [sessionId: number]: User } = {};
   constructor(url: string, options: any) {
     super();
     this.url = url;
@@ -109,26 +120,14 @@ export default class Mumble extends Events.EventEmitter {
   }
 
   setupListeners() {
-    const notify = async (mUser: BaseUser) => {
-      if (!this.sessionMap[mUser.session]) {
-        return;
-      }
-      const user = this.sessionMap[mUser.session];
-      user.notify();
-    };
-
-    this.client.on('user-move', notify);
-    this.client.on('user-mute', notify);
-    this.client.on('user-deaf', notify);
-
     this.client.on('user-connect', (user: BaseUser) => {
-      if (user.name === 'mix-master') {
+      if (user.name === USERNAME) {
         return;
       }
       this.client.connection.sendMessage('UserStats', user.session);
     });
 
-    this.client.connection.on('userStats', (stats: any) => {
+    this.client.connection.on('userStats', async (stats: any) => {
       /*stats.certificates.forEach((cert: any) => {
         var prefix = '-----BEGIN CERTIFICATE-----\n';
         var postfix = '-----END CERTIFICATE-----';
@@ -141,21 +140,31 @@ export default class Mumble extends Events.EventEmitter {
 
       const address = (stats.address as ByteBuffer).toHex().slice(-8);
       const ip = address.match(/../g).map(a => parseInt(a, 16)).join('.');
-      const user = data().upsertUser(ip);
-      this.sessionMap[stats.session] = user;
-      user.setMumble(new MumbleUser(mUser));
-    });
-
-    this.client.on('user-disconnect', async (mUser: BaseUser) => {
-      if (!this.sessionMap[mUser.session]) {
-        return;
+      let voice = await VoiceAccount.findOne({ where: { hash: mUser.hash } });
+      if (!voice) {
+        voice = await VoiceAccount.create({ hash: mUser.hash, name: mUser.name, type: VOICE.mumble, tags: {} });
       }
-      const user = this.sessionMap[mUser.session];
-      user.setMumble();
+      const user = new MumbleUser(mUser, voice);
+      await data().upsertUser(ip, user);
     });
   }
 
   getChannelById(channelId: number) {
     return this.client.channelById(channelId);
+  }
+
+  getChannels() {
+    const output = [];
+    const channels = [this.client.rootChannel];
+    for(let i = 0; i < channels.length; ++i) {
+      const channel = channels[i];
+      channels.push(...channel.children.sort((a, b) => a.position - b.position));
+      output.push({
+        id: channel.id,
+        name: channel.name,
+        children: channel.children.sort((a, b) => a.position - b.position).map(child => child.id),
+      });
+    }
+    return output;
   }
 }

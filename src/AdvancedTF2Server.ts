@@ -34,8 +34,8 @@ export class TF2PlayerStats extends TF2Player {
   isLocked: boolean = false;
   team: TEAMS;
   class: CLASSES;
-  constructor(public player: Player, public user: User, public server: TF2Server, info: AdvancedPlayerJoined) {
-    super(player, user, server, info);
+  constructor(public player: Player, public server: TF2Server, info: AdvancedPlayerJoined) {
+    super(player, server, info);
     this.team = info.team;
     this.class = info.class;
   }
@@ -47,6 +47,7 @@ export class TF2PlayerStats extends TF2Player {
       this.server.send('sm_spunlock #' + this.slotId);
     }
     this.isLocked = isLocked;
+    this.emit('update');
   }
 
   update(playerInfo: AdvancedPlayerJoined) {
@@ -68,11 +69,13 @@ export class TF2PlayerStats extends TF2Player {
 
   toJSON() {
     return {
-      userId: this.user.id,
       slotId: this.slotId,
       name: this.player.name,
       steamId: this.player.steamId,
-      serverIp: this.server.model.ip,
+      server: {
+        id: this.server.model.id,
+        name: this.server.model.name,
+      },
       mute: this.isMute,
       isLocked: this.isLocked,
       team: this.team,
@@ -98,9 +101,8 @@ export default class AdvancedTF2Server extends TF2Server {
     if (!player) {
       player = await Player.create({ steamId, name });
     }
-    const user = data().upsertUser(ip);
-    const tf2Player: TF2Player = new TF2PlayerStats(player, user, this, info);
-    user.setTf2(tf2Player);
+    const tf2Player: TF2Player = new TF2PlayerStats(player, this, info);
+    await data().upsertUser(ip, undefined, tf2Player);
 
     return tf2Player;
   }
@@ -186,7 +188,8 @@ export default class AdvancedTF2Server extends TF2Server {
     };
 
     Object.values(this.players).forEach(player => {
-      server.players[player.user.id] = player.toJSON();
+      const user = data().fetchUserByIP(player.ip);
+      server.players[user.id] = player.toJSON();
     });
 
     return server;

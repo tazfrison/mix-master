@@ -1,6 +1,6 @@
 import config from 'config';
 import cors from 'cors';
-import express, { Application } from 'express';
+import express, { Application, NextFunction, Request, Response } from 'express';
 import http from 'http';
 import path from 'path';
 import socketio from 'socket.io';
@@ -50,11 +50,20 @@ passport.use(new (SteamStrategy as any)({
   }
 ));
 
+const sessionInstance = session({
+  secret: SECRET,
+  resave: false,
+  saveUninitialized: true,
+  store: store,
+  proxy: true,
+});
+
 export default class WebServer {
   app: Application;
   server: http.Server;
   io: socketio.Server;
   sockets: socketio.Socket[] = [];
+  admins: socketio.Socket[] = [];
   users: { [id: number]: Express.User } = {};
   constructor() {
     this.app = express();
@@ -64,13 +73,7 @@ export default class WebServer {
     }));
     this.app.use(express.static(path.join(__dirname, '../', 'public')));
     this.app.use(express.json());
-    this.app.use(session({
-      secret: SECRET,
-      resave: false,
-      saveUninitialized: true,
-      store: store,
-      proxy: true,
-    }));
+    this.app.use(sessionInstance);
     this.app.use(passport.initialize());
     this.app.use(passport.session());
 
@@ -94,11 +97,22 @@ export default class WebServer {
 
     // Socket events
 
+    this.io.use((socket, next) => {
+      sessionInstance(socket.request as Request, {} as Response, next as NextFunction);
+    });
+
     this.io.on('connection', socket => {
+      const admin = socket.request.session?.passport?.user?.admin;
+      if (admin) {
+        this.admins.push(socket);
+      }
       this.sockets.push(socket);
       socket.on('disconnect', () => {
         socket.removeAllListeners();
         this.sockets.splice(this.sockets.indexOf(socket), 1);
+        if (admin) {
+          this.admins.splice(this.admins.indexOf(socket), 1);
+        }
       });
     });
 
@@ -107,9 +121,15 @@ export default class WebServer {
       'delete',
     ].forEach(event => {
       data().on(event, data => {
-        this.sockets.forEach(socket => {
-          socket.emit(event, data);
-        });
+        if (data.admin) {
+          this.admins.forEach(socket => {
+            socket.emit(event, data);
+          });
+        } else {
+          this.sockets.forEach(socket => {
+            socket.emit(event, data);
+          });
+        }
       });
     });
   }

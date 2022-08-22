@@ -35,6 +35,10 @@ export default class Player extends Model {
   @Column
   admin: boolean;
 
+  @Default(false)
+  @Column
+  coach: boolean;
+
   @HasMany(() => LogPlayer)
   logPlayers?: LogPlayer[];
 

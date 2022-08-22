@@ -17,12 +17,14 @@ export interface PlayerJoined {
 
 export class TF2Player extends EventEmitter{
   isMute: boolean = false;
+  ip: string;
   slotId: number;
   name: string;
-  constructor(public player: Player, public user: User, public server: TF2Server, info: PlayerJoined) {
+  constructor(public player: Player, public server: TF2Server, info: PlayerJoined) {
     super();
     this.slotId = info.slotId;
     this.name = info.name;
+    this.ip = info.ip;
   }
 
   get steamId() {
@@ -36,6 +38,7 @@ export class TF2Player extends EventEmitter{
       this.server.send('sm_unsilence #' + this.slotId);
     }
     this.isMute = isMute;
+    this.emit('update');
   }
 
   kick(message?: string) {
@@ -59,11 +62,13 @@ export class TF2Player extends EventEmitter{
 
   toJSON() {
     return {
-      userId: this.user.id,
       slotId: this.slotId,
       name: this.player.name,
       steamId: this.player.steamId,
-      serverIp: this.server.model.ip,
+      server: {
+        id: this.server.model.id,
+        name: this.server.model.name,
+      },
       mute: this.isMute,
     };
   }
@@ -88,6 +93,11 @@ export default class TF2Server extends EventEmitter {
     this.connection = new Rcon(server.ip, server.port || 27015, server.rcon);
     this.setupListeners();
     this.connection.connect();
+
+    ['changeLevel'].forEach(func => {
+      const self: any = this;
+      self[func] = self[func].bind(this);
+    });
   }
 
   setupListeners() {
@@ -122,9 +132,8 @@ export default class TF2Server extends EventEmitter {
     if (!player) {
       player = await Player.create({ steamId, name });
     }
-    const user = data().upsertUser(ip);
-    let tf2Player = new TF2Player(player, user, this, info);
-    user.setTf2(tf2Player);
+    let tf2Player = new TF2Player(player, this, info);
+    await data().upsertUser(ip, undefined, tf2Player);
 
     return tf2Player;
   }
@@ -208,7 +217,8 @@ export default class TF2Server extends EventEmitter {
     };
 
     Object.values(this.players).forEach(player => {
-      server.players[player.user.id] = player.toJSON();
+      const user = data().fetchUserByIP(player.ip);
+      server.players[user.id] = player.toJSON();
     });
 
     return server;

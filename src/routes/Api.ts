@@ -1,34 +1,30 @@
 import { Router } from 'express';
 import data from '../Data';
-import Server from '../models/Server';
-
 import AggregatedClassStats from '../models/AggregatedClassStats';
+import Player from '../models/Player';
 import { isAdmin } from './helpers';
 import LogsRouter from './Logs';
+import PlayerRouter from './Player';
 import ServerRouter from './Server';
-import Player from '../models/Player';
+import UserRouter from './User';
 
 const router = Router();
+
+router.get('/mumble/channels', (req, res) => {
+  const mumble = data().mumble;
+  if (!mumble) {
+    return res.json([]);
+  }
+  return res.json(mumble.getChannels())
+});
 
 router.get('/state', async (req, res) => {
   const state = await data().getState();
   if (req.isAuthenticated()) {
-    state.profile = req.user;
+    const player = await Player.findByPk(req.user.id);
+    state.profile = player;
   }
   res.json(state);
-});
-
-router.get('/players/:id', async (req, res) => {
-  res.json(await Player.scope('withStats').findOne({where: {
-    steamId: req.params.id,
-  }}));
-});
-
-router.get('/players', async (req, res) => {
-  const steamIds = req.query.steamIds as string[];
-  res.json(await Player.scope('withStats').findAll({where: {
-    steamId: steamIds,
-  }}));
 });
 
 router.get('/stats', async (_req, res) => {
@@ -51,12 +47,9 @@ router.post('/draft/:action', isAdmin,
     return next('Not an action');
   });
 
-router.get('/servers', isAdmin,
-  async (_req, res) => {
-    res.json(await Server.scope('admin').findAll());
-  });
-
-router.use('/server', ServerRouter);
+router.use('/players', PlayerRouter);
+router.use('/users', UserRouter);
+router.use('/servers', ServerRouter);
 router.use('/logs', LogsRouter);
 
 export default router;
