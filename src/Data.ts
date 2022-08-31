@@ -23,10 +23,11 @@ import Server from './models/Server';
 import VoiceAccount from './models/VoiceAccount';
 import UserModel from './models/User';
 import checkIp from './IPChecker';
+import MumbleChannel from './models/MumbleChannel';
 
 const adminList: string[] = config.get('roles.admin');
 
-const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck, Server, UserModel];
+const models = [AggregatedClassStats, LogClassStats, LogMedicStats, LogPlayer, VoiceAccount, Player, Round, Log, IPCheck, Server, UserModel, MumbleChannel];
 
 export const sequelize = new Sequelize({
   dialect: 'sqlite',

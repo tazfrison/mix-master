@@ -7,16 +7,9 @@ import LogsRouter from './Logs';
 import PlayerRouter from './Player';
 import ServerRouter from './Server';
 import UserRouter from './User';
+import MumbleRouter from './Mumble';
 
 const router = Router();
-
-router.get('/mumble/channels', (req, res) => {
-  const mumble = data().mumble;
-  if (!mumble) {
-    return res.json([]);
-  }
-  return res.json(mumble.getChannels())
-});
 
 router.get('/state', async (req, res) => {
   const state = await data().getState();
@@ -51,5 +44,6 @@ router.use('/players', PlayerRouter);
 router.use('/users', UserRouter);
 router.use('/servers', ServerRouter);
 router.use('/logs', LogsRouter);
+router.use('/mumble', MumbleRouter);
 
 export default router;

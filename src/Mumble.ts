@@ -1,8 +1,8 @@
+import config from 'config';
 import * as Events from 'events';
 import { Client, connect, User as BaseUser } from 'mumble';
 import data from './Data';
-import User from './User';
-import config from 'config';
+import MumbleChannel from './models/MumbleChannel';
 import VoiceAccount from './models/VoiceAccount';
 import { VOICE } from './types';
 
@@ -17,16 +17,22 @@ export interface UserJoined {
 export class MumbleUser extends Events.EventEmitter {
   user: BaseUser;
   voice: VoiceAccount;
+  tags: { [key: string]: string } = {};
   constructor(user: BaseUser, voice: VoiceAccount) {
     super();
 
     this.user = user;
     this.voice = voice;
     const notify = () => this.emit('update');
-    user.on('move', notify);
+    user.on('move', () => {
+      this.generateTags();
+      notify();
+    });
     user.on('mute', notify);
     user.on('deaf', notify);
     user.on('disconnect', () => this.emit('disconnect'));
+
+    this.generateTags();
   }
 
   get name() {
@@ -57,6 +63,35 @@ export class MumbleUser extends Events.EventEmitter {
     this.user.moveToChannel(data().mumble?.getChannelById(channelId));
   }
 
+  async generateTags() {
+    //TODO: Convert node-mumble to provide full channels from getPath instead of just names
+    const ids: number[] = [];
+    let channel = this.user.channel;
+    while (channel) {
+      ids.unshift(channel.id);
+      channel = channel.parent;
+    }
+    const tags: { [key: string]: string } = this.tags;
+    const channelTags: { [id: number]: MumbleChannel } = {};
+    (await MumbleChannel.findAll({ where: { id: ids } })).forEach(mumbleChannel => {
+      channelTags[mumbleChannel.id] = mumbleChannel;
+    });
+
+    ids.forEach(id => {
+      if (channelTags[id]) {
+        Object.entries(channelTags[id].tags).forEach(([key, value]) => {
+          if (value === null) {
+            delete tags[key];
+          } else {
+            tags[key] = value;
+          }
+        })
+      }
+    });
+
+    this.tags = tags;
+  }
+
   toJSON() {
     return {
       name: this.user.name,
@@ -69,6 +104,7 @@ export class MumbleUser extends Events.EventEmitter {
         path: this.user.channel.getPath(),
       },
       session: this.user.session,
+      tags: this.tags,
     };
   }
 
@@ -153,16 +189,21 @@ export default class Mumble extends Events.EventEmitter {
     return this.client.channelById(channelId);
   }
 
-  getChannels() {
+  async getChannels() {
+    const channelTags: { [id: number]: MumbleChannel } = {};
+    (await MumbleChannel.findAll()).forEach(mumbleChannel => {
+      channelTags[mumbleChannel.id] = mumbleChannel;
+    });
     const output = [];
     const channels = [this.client.rootChannel];
-    for(let i = 0; i < channels.length; ++i) {
+    for (let i = 0; i < channels.length; ++i) {
       const channel = channels[i];
       channels.push(...channel.children.sort((a, b) => a.position - b.position));
       output.push({
         id: channel.id,
         name: channel.name,
         children: channel.children.sort((a, b) => a.position - b.position).map(child => child.id),
+        tags: channelTags[channel.id] ? channelTags[channel.id].tags : undefined,
       });
     }
     return output;

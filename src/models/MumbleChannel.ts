@@ -1,26 +1,16 @@
 import { STRING } from 'sequelize';
 import { Column, Model, Table } from 'sequelize-typescript';
-import { VOICE } from '../types';
 
 @Table({
   timestamps: false,
 })
-export default class VoiceAccount extends Model {
-  @Column
-  hash: string;
-
-  @Column
-  name: string;
-
-  @Column
-  type: VOICE;
-
+export default class MumbleChannel extends Model {
   @Column(STRING)
-  set tags(value: {[name: string]: string}) {
+  set tags(value: {[name: string]: string | null}) {
     this.setDataValue('tags', JSON.stringify(value));
   }
 
-  get tags(): {[name: string]: string} {
+  get tags(): {[name: string]: string | null} {
     return JSON.parse(this.getDataValue('tags'));
   }
 }

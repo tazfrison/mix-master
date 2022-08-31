@@ -8,7 +8,7 @@ import { MumbleUser } from './Mumble';
 import { TF2Player } from './TF2Server';
 import { CLASSES, SKILLS } from './types';
 
-const TAG_MAP: { [channelId: number]: { [className in CLASSES]?: SKILLS } } = config.get('mumble.tags');
+//const TAG_MAP: { [channelId: number]: { [className in CLASSES]?: SKILLS } } = config.get('mumble.tags');
 
 export default class User extends EventEmitter {
   model: UserModel;
@@ -176,7 +176,6 @@ export default class User extends EventEmitter {
 
     if (this.mumble) {
       user.mumble = this.mumble.toJSON();
-      user.tags = TAG_MAP[this.mumble.user.channel.id] || {};
     }
 
     if (this.tf2) {
